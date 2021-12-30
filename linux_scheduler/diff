@@ -1,0 +1,117 @@
+diff -Nur linux-5.14.3/arch/x86/entry/syscalls/syscall_64.tbl mod_linux/linux-5.14.3/arch/x86/entry/syscalls/syscall_64.tbl
+--- linux-5.14.3/arch/x86/entry/syscalls/syscall_64.tbl	2021-09-12 12:31:00.000000000 +0530
++++ mod_linux/linux-5.14.3/arch/x86/entry/syscalls/syscall_64.tbl	2021-12-13 18:57:59.622130307 +0530
+@@ -412,5 +412,6 @@
+ 545	x32	execveat		compat_sys_execveat
+ 546	x32	preadv2			compat_sys_preadv64v2
+ 547	x32	pwritev2		compat_sys_pwritev64v2
++548	common	delay_selection	        sys_delay_selection
+ # This is the end of the legacy x32 range.  Numbers 548 and above are
+ # not special and are not to be used for x32-specific syscalls.
+diff -Nur linux-5.14.3/include/linux/sched.h mod_linux/linux-5.14.3/include/linux/sched.h
+--- linux-5.14.3/include/linux/sched.h	2021-09-12 12:31:00.000000000 +0530
++++ mod_linux/linux-5.14.3/include/linux/sched.h	2021-12-12 17:36:05.417908647 +0530
+@@ -478,6 +478,9 @@
+ 
+ 	struct sched_statistics		statistics;
+ 
++/* Adding new variable to to delay the selection */
++
++	u64                             delay_select;
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ 	int				depth;
+ 	struct sched_entity		*parent;
+diff -Nur linux-5.14.3/include/linux/syscalls.h mod_linux/linux-5.14.3/include/linux/syscalls.h
+--- linux-5.14.3/include/linux/syscalls.h	2021-09-12 12:31:00.000000000 +0530
++++ mod_linux/linux-5.14.3/include/linux/syscalls.h	2021-12-13 22:37:00.719149813 +0530
+@@ -737,6 +737,7 @@
+ 
+ /* kernel/sys.c */
+ asmlinkage long sys_setpriority(int which, int who, int niceval);
++asmlinkage long delay_selection(pid_t pid, u64 delay);
+ asmlinkage long sys_getpriority(int which, int who);
+ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd,
+ 				void __user *arg);
+@@ -1376,6 +1377,8 @@
+ 
+ int __sys_getsockopt(int fd, int level, int optname, char __user *optval,
+ 		int __user *optlen);
++
++
+ int __sys_setsockopt(int fd, int level, int optname, char __user *optval,
+ 		int optlen);
+ #endif
+diff -Nur linux-5.14.3/kernel/sched/core.c mod_linux/linux-5.14.3/kernel/sched/core.c
+--- linux-5.14.3/kernel/sched/core.c	2021-09-12 12:31:00.000000000 +0530
++++ mod_linux/linux-5.14.3/kernel/sched/core.c	2021-12-13 18:19:16.282238301 +0530
+@@ -3945,6 +3945,9 @@
+ 	p->se.vruntime			= 0;
+ 	INIT_LIST_HEAD(&p->se.group_node);
+ 
++/*Intitilizing delay_select with 0 here */
++	p->se.delay_select    = 0; 
++
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ 	p->se.cfs_rq			= NULL;
+ #endif
+diff -Nur linux-5.14.3/kernel/sched/fair.c mod_linux/linux-5.14.3/kernel/sched/fair.c
+--- linux-5.14.3/kernel/sched/fair.c	2021-09-12 12:31:00.000000000 +0530
++++ mod_linux/linux-5.14.3/kernel/sched/fair.c	2021-12-13 21:27:56.196657183 +0530
+@@ -799,7 +799,7 @@
+ 	if (unlikely(!curr))
+ 		return;
+ 
+-	delta_exec = now - curr->exec_start;
++	delta_exec = now - curr->exec_start + curr->delay_select * 1000000 ;
+ 	if (unlikely((s64)delta_exec <= 0))
+ 		return;
+ 
+@@ -811,7 +811,9 @@
+ 	curr->sum_exec_runtime += delta_exec;
+ 	schedstat_add(cfs_rq->exec_clock, delta_exec);
+ 
+-	curr->vruntime += calc_delta_fair(delta_exec, curr);
++/* Here Updating vruntime on the basis of delay recieved by user through system call */
++
++	curr->vruntime += calc_delta_fair(delta_exec, curr)  ;
+ 	update_min_vruntime(cfs_rq);
+ 
+ 	if (entity_is_task(curr)) {
+@@ -4171,7 +4173,7 @@
+ 	 * stays open at the end.
+ 	 */
+ 	if (initial && sched_feat(START_DEBIT))
+-		vruntime += sched_vslice(cfs_rq, se);
++		vruntime += sched_vslice(cfs_rq, se) ;
+ 
+ 	/* sleeps up to a single latency don't count. */
+ 	if (!initial) {
+diff -Nur linux-5.14.3/kernel/sys.c mod_linux/linux-5.14.3/kernel/sys.c
+--- linux-5.14.3/kernel/sys.c	2021-09-12 12:31:00.000000000 +0530
++++ mod_linux/linux-5.14.3/kernel/sys.c	2021-12-13 23:41:01.786245766 +0530
+@@ -1336,6 +1336,25 @@
+ }
+ #endif
+ 
++
++
++SYSCALL_DEFINE2(delay_selection, pid_t, pid, u64, delay)
++{
++  int retval;
++  struct task_struct *p;
++   if (pid < 0 ||  delay < 0 )
++                return -EINVAL;
++
++   p = find_task_by_vpid(pid);
++   if(p) 
++    {
++       p->se.delay_select = delay;
++       retval = 1 ;
++     }	    
++  
++    return retval;
++}	
++
+ SYSCALL_DEFINE2(sethostname, char __user *, name, int, len)
+ {
+ 	int errno;

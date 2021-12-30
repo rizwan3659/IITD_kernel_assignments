@@ -1,0 +1,23 @@
+Run queue have a virtual clock(vruntime).Time passes slower on  this clock than in real time, and the exact speed depends on the number of processes that are currently
+waiting to be picked by the scheduler.
+
+If  virtual time of the run queue is given by fair_clock  while the waiting time of a process is stored in wait_runtime . To sort tasks on the red-black tree, the kernel uses the difference fair_clock - wait_runtime . Fair_clock is a measure for the CPU time a task would have gotten if scheduling were completely fair, wait_runtime is a direct measure for the unfairness caused by the imperfection of real systems.
+
+When a task is allowed to run, the interval during which it has been running is subtracted from wait_runtime . This way, it will move rightward in the time-ordered tree at some point, and another process will be the leftmost one and is consequently selected to run. virtual clock in fair_clock will increase when the task is running.
+ This effectively means that the share of CPU time that the task would have received in a perfectly fair system is deducted from the time spent
+executing on the real CPU.
+
+
+ All calculations related to the virtual clock are performed in update_curr. It computes the time difference between the last update of the load statistics and now, and delegates the rest of the work to __update_curr. update_curr  update the physical and virtual time that the current process has spent executing on the CPU.
+
+I have added the delay passed by user through system call to delta_exec(difference between now and process's last execution time). 
+
+delta_exec = now - curr->exec_start + curr->delay_select * 1000000 ;
+
+ pass the delta exec to calc_delta_fair which computes the value by formula 
+
+delta_exec_weighted = delta_exec × (NICE_0_LOAD / curr->load.weight)
+
+
+
+
