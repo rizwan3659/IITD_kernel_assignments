@@ -1,0 +1,84 @@
+diff -Nur orig_kernel/arch/x86/entry/syscalls/syscall_64.tbl linux-5.14.3/arch/x86/entry/syscalls/syscall_64.tbl
+--- orig_kernel/arch/x86/entry/syscalls/syscall_64.tbl	2021-12-09 02:17:03.585161307 +0530
++++ linux-5.14.3/arch/x86/entry/syscalls/syscall_64.tbl	2021-12-09 02:13:36.778487353 +0530
+@@ -369,6 +369,7 @@
+ 445	common	landlock_add_rule	sys_landlock_add_rule
+ 446	common	landlock_restrict_self	sys_landlock_restrict_self
+ 447	common	memfd_secret		sys_memfd_secret
++448	common	add_delay		sys_add_delay
+ #
+ # Due to a historical design error, certain syscalls are numbered differently
+ # in x32 as compared to native x86_64.  These syscalls have numbers 512-547.
+diff -Nur orig_kernel/include/linux/sched.h linux-5.14.3/include/linux/sched.h
+--- orig_kernel/include/linux/sched.h	2021-12-09 02:06:36.451805864 +0530
++++ linux-5.14.3/include/linux/sched.h	2021-12-09 01:43:44.305090798 +0530
+@@ -472,6 +472,7 @@
+ 	u64				exec_start;
+ 	u64				sum_exec_runtime;
+ 	u64				vruntime;
++	u64				delay;
+ 	u64				prev_sum_exec_runtime;
+ 
+ 	u64				nr_migrations;
+diff -Nur orig_kernel/kernel/sched/core.c linux-5.14.3/kernel/sched/core.c
+--- orig_kernel/kernel/sched/core.c	2021-12-09 02:07:23.645140859 +0530
++++ linux-5.14.3/kernel/sched/core.c	2021-12-06 04:52:46.171126299 +0530
+@@ -3943,6 +3943,7 @@
+ 	p->se.prev_sum_exec_runtime	= 0;
+ 	p->se.nr_migrations		= 0;
+ 	p->se.vruntime			= 0;
++	p->se.delay			= 0;
+ 	INIT_LIST_HEAD(&p->se.group_node);
+ 
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+diff -Nur orig_kernel/kernel/sched/fair.c linux-5.14.3/kernel/sched/fair.c
+--- orig_kernel/kernel/sched/fair.c	2021-12-09 02:08:09.225142472 +0530
++++ linux-5.14.3/kernel/sched/fair.c	2021-12-08 13:26:00.033526639 +0530
+@@ -799,7 +799,7 @@
+ 	if (unlikely(!curr))
+ 		return;
+ 
+-	delta_exec = now - curr->exec_start;
++	delta_exec = now - curr->exec_start+curr->delay;
+ 	if (unlikely((s64)delta_exec <= 0))
+ 		return;
+ 
+diff -Nur orig_kernel/kernel/sys.c linux-5.14.3/kernel/sys.c
+--- orig_kernel/kernel/sys.c	2021-12-09 02:05:57.931804509 +0530
++++ linux-5.14.3/kernel/sys.c	2021-12-09 02:09:55.315146211 +0530
+@@ -200,6 +200,35 @@
+ out:
+ 	return error;
+ }
++SYSCALL_DEFINE2(add_delay,int, pid, s64, delay_value)
++{
++	struct task_struct *process = NULL, *temp = NULL;
++	if(pid<0)
++	{
++		printk(KERN_INFO "ERROR in PID %d\n",pid);
++		return -EINVAL;
++	}
++	for_each_process(temp)
++	{
++		if((long)task_pid_nr(temp)==pid)
++		{
++			process = temp;
++			break;
++		}
++	}	
++	if(process==NULL)
++	{
++		printk(KERN_INFO "ERROR IN PROCESS");
++		return -EINVAL;
++	}
++	//process->se.vruntime+=delay_value*1000000;
++	process->se.delay =delay_value*1000000;
++        printk(KERN_INFO "sum_exec_runtime %llu\n",process->se.sum_exec_runtime);
++        printk(KERN_INFO "vruntime %llu\n",process->se.vruntime);
++        printk(KERN_INFO "prev_sum_exec_runtime %llu\n",process->se.prev_sum_exec_runtime);
++	printk(KERN_INFO "Delay of %lld is added for process with pid %d\n",delay_value,pid);
++	return 0;
++}
+ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
+ {
+ 	struct task_struct *g, *p;
